@@ -9,8 +9,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>384</width>
-    <height>343</height>
+    <width>394</width>
+    <height>368</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -21,8 +21,8 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>371</width>
-     <height>331</height>
+     <width>390</width>
+     <height>360</height>
     </rect>
    </property>
    <layout class="QVBoxLayout" name="layout">
@@ -432,6 +432,24 @@ QLabel:!enabled{color: red;}</string>
          </widget>
         </item>
        </layout>
+      </item>
+     </layout>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="horizontalLayout_4">
+      <item>
+       <widget class="QLabel" name="label_4">
+        <property name="text">
+         <string>Path Progress:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QProgressBar" name="pathProgressBar">
+        <property name="value">
+         <number>24</number>
+        </property>
+       </widget>
       </item>
      </layout>
     </item>
