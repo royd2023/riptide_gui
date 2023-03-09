@@ -4,6 +4,7 @@
 
 #include <riptide_msgs2/msg/controller_command.hpp>
 #include <riptide_msgs2/msg/kill_switch_report.hpp>
+#include <riptide_msgs2/action/follow_path.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <std_msgs/msg/bool.hpp>
@@ -18,6 +19,8 @@
 
 namespace riptide_rviz
 {
+    using FollowPath = riptide_msgs2::action::FollowPath;
+    using GHFollowPath = rclcpp_action::ClientGoalHandle<riptide_msgs2::action::FollowPath>;
 
     class ControlPanel : public rviz_common::Panel
     {
@@ -67,6 +70,9 @@ namespace riptide_rviz
         double max_depth_in_place, tgt_in_place_depth;
         std::chrono::duration<double> odom_timeout;
 
+        // Map frame ID used in FollowPath
+        std::string map_frame_id;
+
         // mode for sending commands to the controller
         uint8_t ctrlMode;
 
@@ -95,6 +101,17 @@ namespace riptide_rviz
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub;
         rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr steadySub;
         rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr selectPoseSub;
+
+        // ROS Action Clients
+        rclcpp_action::Client<riptide_msgs2::action::FollowPath>::SharedPtr followPathClient;
+        
+        // Action Client Callback
+        void followPathGoalResponseCb(const GHFollowPath::SharedPtr & goal_handle);
+        void followPathFeedbackCb(GHFollowPath::SharedPtr, const std::shared_ptr<const FollowPath::Feedback> feedback);
+        void followPathResultCb(const GHFollowPath::WrappedResult & result);
+
+        // Helper functons
+        geometry_msgs::msg::PoseStamped getPoseStamped(double x, double y, double z, double roll, double pitch, double yaw);
     };
 
 } // namespace riptide_rviz

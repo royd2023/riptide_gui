@@ -1,15 +1,19 @@
 #include "riptide_rviz/ControlPanel.hpp"
+
+#include <QMessageBox>
 #include <tf2/LinearMath/Quaternion.h>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
 #include <chrono>
 #include <algorithm>
 #include <iostream>
+#include <functional>
 
 #include <rviz_common/logging.hpp>
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
+using std::placeholders::_2;
 
 namespace riptide_rviz
 {
@@ -69,6 +73,9 @@ namespace riptide_rviz
         connect(uiPanel->CtrlSendCmd, &QPushButton::clicked, [this](void)
                 { handleCommand(); });
 
+        uiPanel->pathProgressBar->setMaximum(100);
+        uiPanel->pathProgressBar->setFormat("%v%");
+
         RVIZ_COMMON_LOG_INFO("Initialized control panel");
     }
 
@@ -90,6 +97,13 @@ namespace riptide_rviz
             // default value
             robot_ns = "/talos";
             RVIZ_COMMON_LOG_WARNING("Loading default value for 'namespace'");
+        }
+
+        if (config.mapGetString("map_frame_id", str)) {
+            map_frame_id = str->toStdString();
+        } else {
+            // default
+            map_frame_id = "map";
         }
 
         if(config.mapGetFloat("odom_timeout", configVal)){
@@ -144,6 +158,8 @@ namespace riptide_rviz
             robot_ns + "/controller/steady", rclcpp::SystemDefaultsQoS(),
             std::bind(&ControlPanel::steadyCallback, this, _1));  
 
+        followPathClient = rclcpp_action::create_client<FollowPath>(clientNode, robot_ns + "/follow_path");
+
         // now we can start the UI refresh timer
         uiTimer->start(100);
         
@@ -162,6 +178,7 @@ namespace riptide_rviz
         config.mapSetValue("odom_timeout", odom_timeout.count());
         config.mapSetValue("max_depth_in_place", max_depth_in_place);
         config.mapSetValue("tgt_in_place_depth", tgt_in_place_depth);
+        config.mapSetValue("map_frame_id", QString::fromStdString(map_frame_id));
     }
 
     bool ControlPanel::event(QEvent *event)
@@ -366,21 +383,46 @@ namespace riptide_rviz
     {
         // first take the current readout and hold it
         // only need xy and yaw, we discard roll and pitch and z
-        double x, y, z, roll, pitch, yaw;
-        bool convOk[6];
+        double xCurrent, yCurrent, zCurrent, rollCurrent, pitchCurrent, yawCurrent;
+        double xEnd, yEnd, zEnd, rollEnd, pitchEnd, yawEnd;
+        bool convOkCurrent[6];
+        bool convOkEnd[6];
+
+        uiPanel->pathProgressBar->setValue(0);
+        uiPanel->pathProgressBar->setStyleSheet("");
+        uiPanel->pathProgressBar->setFormat("%v%");
 
         // make sure that the conversion goes okay as well
-        x = uiPanel->cmdReqX->text().toDouble(&convOk[0]);
-        y = uiPanel->cmdReqY->text().toDouble(&convOk[1]);
-        z = uiPanel->cmdReqZ->text().toDouble(&convOk[2]);
-        roll = uiPanel->cmdReqR->text().toDouble(&convOk[3]);
-        pitch = uiPanel->cmdReqP->text().toDouble(&convOk[4]);
-        yaw = uiPanel->cmdReqYaw->text().toDouble(&convOk[5]);
+        xCurrent = uiPanel->cmdReqX->text().toDouble(&convOkCurrent[0]);
+        yCurrent = uiPanel->cmdReqY->text().toDouble(&convOkCurrent[1]);
+        zCurrent = uiPanel->cmdReqZ->text().toDouble(&convOkCurrent[2]);
+        rollCurrent = uiPanel->cmdReqR->text().toDouble(&convOkCurrent[3]);
+        pitchCurrent = uiPanel->cmdReqP->text().toDouble(&convOkCurrent[4]);
+        yawCurrent = uiPanel->cmdReqYaw->text().toDouble(&convOkCurrent[5]);
 
-        if (std::any_of(std::begin(convOk), std::end(convOk), [](bool i)
-                        { return !i; }))
+        xEnd = uiPanel->cmdReqX->text().toDouble(&convOkEnd[0]);
+        yEnd = uiPanel->cmdReqY->text().toDouble(&convOkEnd[1]);
+        zEnd = uiPanel->cmdReqZ->text().toDouble(&convOkEnd[2]);
+        rollEnd = uiPanel->cmdReqR->text().toDouble(&convOkEnd[3]);
+        pitchEnd = uiPanel->cmdReqP->text().toDouble(&convOkEnd[4]);
+        yawEnd = uiPanel->cmdReqYaw->text().toDouble(&convOkEnd[5]);
+
+        bool currentConversionFailed = std::any_of(std::begin(convOkCurrent), std::end(convOkCurrent), [](bool i)
+                        { return !i; });
+        bool endConversionFailed = std::any_of(std::begin(convOkEnd), std::end(convOkEnd), [](bool i)
+                        { return !i; });
+
+        if (currentConversionFailed || endConversionFailed)
         {
-            RVIZ_COMMON_LOG_ERROR("Failed to convert current position to floating point");
+            if (currentConversionFailed) 
+            {
+                RVIZ_COMMON_LOG_ERROR("Failed to convert current position to floating point");
+            }
+
+            if (endConversionFailed) {
+                RVIZ_COMMON_LOG_ERROR("Failed to convert target position to floating point");
+            }
+
             // set the red stylesheet
             uiPanel->CtrlSendCmd->setStyleSheet("QPushButton{color:black; background: red;}");
 
@@ -390,44 +432,130 @@ namespace riptide_rviz
             return;
         }
 
-        // now we can build the command and send it
-        // build the linear control message
-        auto linCmd = riptide_msgs2::msg::ControllerCommand();
-        linCmd.setpoint_vect.x = x;
-        linCmd.setpoint_vect.y = y;
-        linCmd.setpoint_vect.z = z;
-        linCmd.mode = ctrlMode;
+        // Check the distance between the start and end point
+        double distance = std::sqrt(std::pow(xEnd - xCurrent, 2) 
+                                + std::pow(yEnd - yCurrent, 2) 
+                                + std::pow(zEnd - zCurrent, 2));
+        
+        if (distance < 1.0) {
+            // Small distances should send a regular ControllerCommand message
 
-        // if we are in position, we use quat, otherwise use the vector
-        auto angCmd = riptide_msgs2::msg::ControllerCommand();
-        angCmd.mode = ctrlMode;
+            // now we can build the command and send it
+            // build the linear control message
+            auto linCmd = riptide_msgs2::msg::ControllerCommand();
+            linCmd.setpoint_vect.x = xCurrent;
+            linCmd.setpoint_vect.y = yCurrent;
+            linCmd.setpoint_vect.z = zCurrent;
+            linCmd.mode = ctrlMode;
 
-        if (ctrlMode == riptide_msgs2::msg::ControllerCommand::POSITION)
-        {
-            // check the angle mode button
-            if(degreeReadout){
-                roll *= M_PI / 180.0; 
-                pitch *= M_PI / 180.0; 
-                yaw *= M_PI / 180.0; 
+            // if we are in position, we use quat, otherwise use the vector
+            auto angCmd = riptide_msgs2::msg::ControllerCommand();
+            angCmd.mode = ctrlMode;
+
+            if (ctrlMode == riptide_msgs2::msg::ControllerCommand::POSITION)
+            {
+                // check the angle mode button
+                if(degreeReadout){
+                    rollCurrent *= M_PI / 180.0; 
+                    pitchCurrent *= M_PI / 180.0; 
+                    yawCurrent *= M_PI / 180.0; 
+                }
+
+                // convert RPY to quaternion
+                tf2::Quaternion quat;
+                quat.setRPY(rollCurrent, pitchCurrent, yawCurrent);
+
+                // build the angular quat for message
+                angCmd.setpoint_quat = tf2::toMsg(quat);
+            } else {
+                // build the vector
+                angCmd.setpoint_vect.x = rollCurrent;
+                angCmd.setpoint_vect.y = pitchCurrent;
+                angCmd.setpoint_vect.z = yawCurrent;
             }
 
-            // convert RPY to quaternion
-            tf2::Quaternion quat;
-            quat.setRPY(roll, pitch, yaw);
-
-            // build the angular quat for message
-            angCmd.setpoint_quat = tf2::toMsg(quat);
+            // send the control messages
+            ctrlCmdLinPub->publish(linCmd);
+            ctrlCmdAngPub->publish(angCmd);
         } else {
-            // build the vector
-            angCmd.setpoint_vect.x = roll;
-            angCmd.setpoint_vect.y = pitch;
-            angCmd.setpoint_vect.z = yaw;
+            if (!followPathClient->action_server_is_ready()) {
+                QMessageBox::critical(this, "Error Sending Path", "Path action server is unavailable");
+                return;
+            }
+            // Large distances should send a path to the action server
+            
+            auto start = getPoseStamped(xCurrent,
+                                        yCurrent,
+                                        zCurrent,
+                                        rollCurrent,
+                                        pitchCurrent,
+                                        yawCurrent);
+
+            auto end = getPoseStamped(xEnd,
+                                      yEnd,
+                                      zEnd,
+                                      rollEnd,
+                                      pitchEnd,
+                                      yawEnd);
+
+            auto goal_msg = FollowPath::Goal();
+            goal_msg.path_points = {start, end};
+            
+
+            auto send_goal_options = rclcpp_action::Client<FollowPath>::SendGoalOptions();
+            send_goal_options.goal_response_callback = std::bind(&ControlPanel::followPathGoalResponseCb, this, _1);
+            send_goal_options.feedback_callback = std::bind(&ControlPanel::followPathFeedbackCb, this, _1, _2);
+            send_goal_options.result_callback = std::bind(&ControlPanel::followPathResultCb, this, _1);
+            followPathClient->async_send_goal(goal_msg, send_goal_options);
+        }
+    }
+
+    geometry_msgs::msg::PoseStamped ControlPanel::getPoseStamped(double x, double y, double z, double roll, double pitch, double yaw) {
+        geometry_msgs::msg::PoseStamped pose;
+        pose.header.frame_id = map_frame_id;
+
+        pose.pose.position.x = x;
+        pose.pose.position.y = y;
+        pose.pose.position.z = z;
+
+        // check the angle mode button
+        if(degreeReadout) {
+            roll *= M_PI / 180.0; 
+            pitch *= M_PI / 180.0; 
+            yaw *= M_PI / 180.0; 
         }
 
-        // send the control messages
-        ctrlCmdLinPub->publish(linCmd);
-        ctrlCmdAngPub->publish(angCmd);
+        // convert RPY to quaternion
+        tf2::Quaternion quat;
+        quat.setRPY(roll, pitch, yaw);
+
+        // build the angular quat for message
+        pose.pose.orientation = tf2::toMsg(quat);
+
+        return pose;
     }
+
+    void ControlPanel::followPathGoalResponseCb(const GHFollowPath::SharedPtr & goal_handle) {
+        if (!goal_handle) {
+            QMessageBox::critical(this, "Error Sending Path", "Path action server rejected the action");
+            RVIZ_COMMON_LOG_ERROR("followPathGoalResponseCb: Server has rejected the goal.");
+        }
+    }
+
+    void ControlPanel::followPathFeedbackCb(GHFollowPath::SharedPtr, const std::shared_ptr<const FollowPath::Feedback> feedback) {
+        uiPanel->pathProgressBar->setValue((feedback->current_prog / feedback->expected_prog) * 100);
+    }
+
+    void ControlPanel::followPathResultCb(const GHFollowPath::WrappedResult & result) {
+        if (result.code == rclcpp_action::ResultCode::SUCCEEDED) {
+            uiPanel->pathProgressBar->setValue(100);
+            uiPanel->pathProgressBar->setFormat("SUCCEEDED");
+        } else {
+            uiPanel->pathProgressBar->setStyleSheet("QProgressBar {color: white; background: rgb(140, 100, 100);}");
+            uiPanel->pathProgressBar->setFormat("ERROR");
+        }
+    }
+
 
     void ControlPanel::odomCallback(const nav_msgs::msg::Odometry &msg)
     {
