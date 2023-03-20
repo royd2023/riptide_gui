@@ -7,6 +7,7 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <sensor_msgs/msg/joy.hpp>
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 #include <ament_index_cpp/get_package_prefix.hpp>
@@ -18,6 +19,23 @@
 
 namespace riptide_rviz
 {
+    struct ControllerMappings {
+        int 
+            leftTrigger,
+            rightTrigger,
+            leftJoystickX,
+            leftJoystickY,
+            rightJoystickX,
+            rightJoystickY,
+            A,
+            B,
+            X,
+            Y,
+            RB,
+            LB,
+            START,
+            SELECT;
+    };
 
     class ControlPanel : public rviz_common::Panel
     {
@@ -43,6 +61,7 @@ namespace riptide_rviz
         void handleEnable();
         void handleDisable(); // pressing disable asserts kill and clears command
         void switchMode(uint8_t mode, bool override=false);
+        void switchToTeleop();
 
         // slots for controlling the UI
         void toggleDegrees();
@@ -57,6 +76,12 @@ namespace riptide_rviz
         bool event(QEvent *event);
 
     private:
+        //epic util funcs
+        float getFloatFromConfig(const rviz_common::Config &config, std::string name, float defaultValue);
+
+        //teleop callback
+        void joyCb(const sensor_msgs::msg::Joy::SharedPtr msg);
+
         // UI Panel instance
         Ui_ControlPanel *uiPanel;
 
@@ -76,6 +101,10 @@ namespace riptide_rviz
         // internal flags
         bool vehicleEnabled = false;
         bool degreeReadout = true;
+        bool teleop = false;
+
+        //teleop controller mappings
+        ControllerMappings joyMappings;
 
         // QT ui timer for handling data freshness
         QTimer *uiTimer;
@@ -91,6 +120,7 @@ namespace riptide_rviz
         rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odomSub;
         rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr steadySub;
         rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr selectPoseSub;
+        rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joySub;
     };
 
 } // namespace riptide_rviz

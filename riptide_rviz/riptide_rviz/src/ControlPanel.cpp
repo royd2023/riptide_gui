@@ -47,9 +47,9 @@ namespace riptide_rviz
         connect(uiPanel->ctrlModeFFD, &QPushButton::clicked,
                 [this](void)
                 { switchMode(riptide_msgs2::msg::ControllerCommand::FEEDFORWARD); });
-        connect(uiPanel->ctrlModeVel, &QPushButton::clicked,
+        connect(uiPanel->ctrlModeTele, &QPushButton::clicked,
                 [this](void)
-                { switchMode(22); });
+                { switchToTeleop(); });
 
         // command sending buttons
         connect(uiPanel->ctrlDiveInPlace, &QPushButton::clicked, [this](void)
@@ -79,6 +79,8 @@ namespace riptide_rviz
             robot_ns = "/talos";
             RVIZ_COMMON_LOG_WARNING("ControlPanel: Loading default value for 'namespace'");
         }
+
+        // odom_timeout = getFloatFromConfig()
 
         if(config.mapGetFloat("odom_timeout", configVal)){
             odom_timeout = std::chrono::duration<double>(*configVal);
@@ -135,6 +137,9 @@ namespace riptide_rviz
         steadySub = node->create_subscription<std_msgs::msg::Bool>(
             robot_ns + "/controller/steady", rclcpp::SystemDefaultsQoS(),
             std::bind(&ControlPanel::steadyCallback, this, _1));  
+        joySub = clientNode->create_subscription<sensor_msgs::msg::Joy>(
+            robot_ns + "/joy", rclcpp::SystemDefaultsQoS(),
+            std::bind(&ControlPanel::joyCb, this, _1));
 
         // now we can start the UI refresh timer
         uiTimer->start(100);
@@ -159,6 +164,24 @@ namespace riptide_rviz
     bool ControlPanel::event(QEvent *event)
     {
         return false;
+    }
+
+    float getFloatFromConfig(const rviz_common::Config &config, const std::string &name, float defaultValue) {
+        float configVal;
+
+        if(config.mapGetFloat(QString::fromStdString(name), &configVal)){
+            return configVal;
+        } else {
+            // default value
+            RVIZ_COMMON_LOG_WARNING("Loading default value for '" + name + "'");
+            return defaultValue;
+        }
+    }
+
+    void ControlPanel::joyCb(const sensor_msgs::msg::Joy::SharedPtr msg) {
+        if(teleop) {
+            
+        }
     }
 
     ControlPanel::~ControlPanel()
@@ -190,6 +213,8 @@ namespace riptide_rviz
 
     void ControlPanel::switchMode(uint8_t mode, bool override)
     {
+        teleop = false;
+
         // check the vehicle is enabled or we are overriding
         if(vehicleEnabled || override){
             ctrlMode = mode;
@@ -226,6 +251,14 @@ namespace riptide_rviz
                 break;
             }
         }
+    }
+
+    void ControlPanel::switchToTeleop() {
+        teleop = true;
+        uiPanel->ctrlModeFFD->setEnabled(true);
+        uiPanel->ctrlModeVel->setEnabled(true);
+        uiPanel->ctrlModePos->setEnabled(true);
+        uiPanel->ctrlModeTele->setEnabled(false);
     }
 
     void ControlPanel::refreshUI()
