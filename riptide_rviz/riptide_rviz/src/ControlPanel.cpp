@@ -260,6 +260,7 @@ namespace riptide_rviz
         auto diff = clientNode->get_clock()->now() - odomTime;
         if (diff.to_chrono<std::chrono::seconds>() > odom_timeout || !vehicleEnabled)
         {
+
             // the odom has timed out
             if (uiPanel->CtrlSendCmd->isEnabled()){
                 RVIZ_COMMON_LOG_WARNING("Odom timed out, or vehicle disabled! disabling local control buttons");
@@ -269,6 +270,14 @@ namespace riptide_rviz
             }
 
             // also disable command sending
+            if (!vehicleEnabled) {
+                RVIZ_COMMON_LOG_WARNING("vehicleEnabled == false: Disabling ctrlSendCmd because of odom_timeout");
+            }
+
+            if (diff.to_chrono<std::chrono::seconds>() > odom_timeout) {
+                RVIZ_COMMON_LOG_WARNING("Odom Timeout reached: Disabling ctrlSendCmd because of odom_timeout");
+            }
+
             uiPanel->ctrlDiveInPlace->setEnabled(false);
             uiPanel->CtrlSendCmd->setEnabled(false);
         }
