@@ -235,6 +235,29 @@ namespace riptide_rviz
         }
     }
 
+    int getIntFromConfig(const rviz_common::Config &config, const std::string &name, float defaultValue)
+    {
+        int configVal;
+
+        if (config.mapGetInt(QString::fromStdString(name), &configVal))
+        {
+            return configVal;
+        }
+        else
+        {
+            // default value
+            RVIZ_COMMON_LOG_WARNING("Loading default value for '" + name + "'");
+            return defaultValue;
+        }
+    }
+
+    void ControlPanel::joyCb(const sensor_msgs::msg::Joy::SharedPtr msg)
+    {
+        if (teleop)
+        {
+        }
+    }
+
     ControlPanel::~ControlPanel()
     {
         // master window control removal
@@ -604,7 +627,7 @@ namespace riptide_rviz
     {
         auto killMsg = riptide_msgs2::msg::KillSwitchReport();
         killMsg.kill_switch_id = riptide_msgs2::msg::KillSwitchReport::KILL_SWITCH_RQT_CONTROLLER;
-        killMsg.sender_id = "/riptide_rviz_control";
+        killMsg.sender_id = "/riptihandleCommandde_rviz_control";
         killMsg.switch_asserting_kill = !vehicleEnabled;
         killMsg.switch_needs_update = uiPanel->ctrlRequireKill->isChecked();
 

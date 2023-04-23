@@ -110,6 +110,9 @@ namespace riptide_rviz
         //teleop controller mappings
         ControllerMappings joyMappings;
 
+        //teleop controller mappings
+        ControllerMappings joyMappings;
+
         // QT ui timer for handling data freshness
         QTimer *uiTimer;
 
