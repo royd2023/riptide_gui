@@ -17,6 +17,10 @@
 #include "ui_ControlPanel.h"
 #include <QTimer>
 
+//For controller mapping
+#include <QList>
+#include <riptide_rviz/ControllerMapping.hpp>
+
 namespace riptide_rviz
 {
     struct ControllerMappings {
@@ -77,7 +81,7 @@ namespace riptide_rviz
 
     private:
         //epic util funcs
-        float getFloatFromConfig(const rviz_common::Config &config, std::string name, float defaultValue);
+        int getIntFromConfig(const rviz_common::Config &config, std::string name, float defaultValue);
 
         //teleop callback
         void joyCb(const sensor_msgs::msg::Joy::SharedPtr msg);
@@ -125,6 +129,12 @@ namespace riptide_rviz
         rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr steadySub;
         rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr selectPoseSub;
         rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joySub;
+
+        //Last odom message
+        nav_msgs::msg::Odometry lastOdom;
+
+        //Lits of controller mappings
+        QList<QVariant> controllerMappingList;
     };
 
 } // namespace riptide_rviz
