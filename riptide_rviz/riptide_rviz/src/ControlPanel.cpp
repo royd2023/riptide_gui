@@ -5,12 +5,17 @@
 #include <chrono>
 #include <algorithm>
 #include <iostream>
+#include <QVariant>
 
 #include <rviz_common/logging.hpp>
 #include <rviz_common/display_context.hpp>
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
+
+//Register as QVariant to serialize into config
+Q_DECLARE_METATYPE(riptide_rviz::ControllerMapping*)
+Q_DECLARE_METATYPE(riptide_rviz::ControllerMapping)
 
 namespace riptide_rviz
 {
@@ -23,6 +28,9 @@ namespace riptide_rviz
 
         // create the default message
         ctrlMode = riptide_msgs2::msg::ControllerCommand::DISABLED;
+
+        qRegisterMetaType<riptide_rviz::ControllerMapping>();
+        qRegisterMetaType<riptide_rviz::ControllerMapping*>();
 
         RVIZ_COMMON_LOG_INFO("ControlPanel: Constructed control panel");
     }
@@ -68,13 +76,16 @@ namespace riptide_rviz
         rviz_common::Panel::load(config);
 
         // create our value containers
-        QString * str = new QString();
-        float * configVal = new float();
+        QString *str = new QString();
+        float *configVal = new float();
 
         // load the namesapce param
-        if(config.mapGetString("robot_namespace", str)){
+        if (config.mapGetString("robot_namespace", str))
+        {
             robot_ns = str->toStdString();
-        } else {
+        }
+        else
+        {
             // default value
             robot_ns = "/talos";
             RVIZ_COMMON_LOG_WARNING("ControlPanel: Loading default value for 'namespace'");
@@ -82,33 +93,61 @@ namespace riptide_rviz
 
         // odom_timeout = getFloatFromConfig()
 
-        if(config.mapGetFloat("odom_timeout", configVal)){
+        if (config.mapGetFloat("odom_timeout", configVal))
+        {
             odom_timeout = std::chrono::duration<double>(*configVal);
-        } else {
+        }
+        else
+        {
             // default value
             odom_timeout = std::chrono::duration<double>(2.5);
             RVIZ_COMMON_LOG_WARNING("ControlPanel: Loading default value for 'odom_timeout' in ");
         }
 
-        if(config.mapGetFloat("tgt_in_place_depth", configVal)){
+        if (config.mapGetFloat("tgt_in_place_depth", configVal))
+        {
             tgt_in_place_depth = *configVal;
-        } else {
+        }
+        else
+        {
             // default value
             tgt_in_place_depth = -0.75;
             RVIZ_COMMON_LOG_WARNING("ControlPanel: Loading default value for 'tgt_in_place_depth'");
         }
 
-        if(config.mapGetFloat("max_depth_in_place", configVal)){
+        if (config.mapGetFloat("max_depth_in_place", configVal))
+        {
             max_depth_in_place = *configVal;
-        } else {
+        }
+        else
+        {
             // default value
             max_depth_in_place = -0.5;
             RVIZ_COMMON_LOG_WARNING("ControlPanel: Loading default value for 'max_depth_in_place'");
         }
 
+        //Load controller mappings
+        // QVariant *tempVariant = new QVariant();
+        // if (config.mapGetValue("controller_mappings", tempVariant))
+        // {
+        //     controllerMappingList = tempVariant->toList();
+        // }
+        // else
+        // {
+        //     RVIZ_COMMON_LOG_WARNING("Loading default controller mapping for 'controller_mappings'");
+        //     //TODO Create standard controller mapping list for xb360 (?)
+        //     ControllerMapping *tempMapping = new ControllerMapping();
+        //     tempMapping->inputType = riptide_rviz::ANALOG;
+        //     tempMapping->name = "Testing";
+        //     tempMapping->primaryChannel = 5;
+        //     QVariant tempQ = QVariant::fromValue(tempMapping);
+        //     controllerMappingList.append(tempQ);
+        // }
+        // delete tempVariant;
+
         // Free the allocated containers
         delete str;
-        delete configVal; 
+        delete configVal;
 
         // create the timer but hold on starting it as things may not have been fully initialized yet
         uiTimer = new QTimer(this);
@@ -122,7 +161,7 @@ namespace riptide_rviz
         // setup goal_pose sub
         selectPoseSub = node->create_subscription<geometry_msgs::msg::PoseStamped>(
             "goal_pose", rclcpp::SystemDefaultsQoS(),
-            std::bind(&ControlPanel::selectedPose, this, _1)); 
+            std::bind(&ControlPanel::selectedPose, this, _1));
 
         // setup the ROS topics that depend on namespace
         // make publishers
@@ -136,14 +175,14 @@ namespace riptide_rviz
             std::bind(&ControlPanel::odomCallback, this, _1));
         steadySub = node->create_subscription<std_msgs::msg::Bool>(
             robot_ns + "/controller/steady", rclcpp::SystemDefaultsQoS(),
-            std::bind(&ControlPanel::steadyCallback, this, _1));  
+            std::bind(&ControlPanel::steadyCallback, this, _1));
         joySub = clientNode->create_subscription<sensor_msgs::msg::Joy>(
             robot_ns + "/joy", rclcpp::SystemDefaultsQoS(),
             std::bind(&ControlPanel::joyCb, this, _1));
 
         // now we can start the UI refresh timer
         uiTimer->start(100);
-        
+
         // and start the kill switch pub timer
         killPubTimer = node->create_wall_timer(50ms, std::bind(&ControlPanel::sendKillMsgTimer, this));
 
@@ -159,6 +198,13 @@ namespace riptide_rviz
         config.mapSetValue("odom_timeout", odom_timeout.count());
         config.mapSetValue("max_depth_in_place", max_depth_in_place);
         config.mapSetValue("tgt_in_place_depth", tgt_in_place_depth);
+
+        //Save controller mappings
+        config.mapSetValue("controller_mappings", controllerMappingList);
+        // for (QVariant mapping : controllerMappingList)
+        // {
+        //     delete &mapping;
+        // }
     }
 
     bool ControlPanel::event(QEvent *event)
@@ -166,21 +212,26 @@ namespace riptide_rviz
         return false;
     }
 
-    float getFloatFromConfig(const rviz_common::Config &config, const std::string &name, float defaultValue) {
-        float configVal;
+    int getIntFromConfig(const rviz_common::Config &config, const std::string &name, float defaultValue)
+    {
+        int configVal;
 
-        if(config.mapGetFloat(QString::fromStdString(name), &configVal)){
+        if (config.mapGetInt(QString::fromStdString(name), &configVal))
+        {
             return configVal;
-        } else {
+        }
+        else
+        {
             // default value
             RVIZ_COMMON_LOG_WARNING("Loading default value for '" + name + "'");
             return defaultValue;
         }
     }
 
-    void ControlPanel::joyCb(const sensor_msgs::msg::Joy::SharedPtr msg) {
-        if(teleop) {
-            
+    void ControlPanel::joyCb(const sensor_msgs::msg::Joy::SharedPtr msg)
+    {
+        if (teleop)
+        {
         }
     }
 
@@ -216,7 +267,8 @@ namespace riptide_rviz
         teleop = false;
 
         // check the vehicle is enabled or we are overriding
-        if(vehicleEnabled || override){
+        if (vehicleEnabled || override)
+        {
             ctrlMode = mode;
             switch (ctrlMode)
             {
@@ -253,7 +305,8 @@ namespace riptide_rviz
         }
     }
 
-    void ControlPanel::switchToTeleop() {
+    void ControlPanel::switchToTeleop()
+    {
         teleop = true;
         uiPanel->ctrlModeFFD->setEnabled(true);
         uiPanel->ctrlModeVel->setEnabled(true);
@@ -332,17 +385,18 @@ namespace riptide_rviz
         }
 
         // build the linear control message
-        // auto override the control mode to position 
+        // auto override the control mode to position
         auto linCmd = riptide_msgs2::msg::ControllerCommand();
         linCmd.setpoint_vect.x = x;
         linCmd.setpoint_vect.y = y;
         // automatically go to configured depth below surface
-        linCmd.setpoint_vect.z = tgt_in_place_depth; 
+        linCmd.setpoint_vect.z = tgt_in_place_depth;
         linCmd.mode = riptide_msgs2::msg::ControllerCommand::POSITION;
 
         // check the angle mode button
-        if(degreeReadout){
-            yaw *= M_PI / 180.0; 
+        if (degreeReadout)
+        {
+            yaw *= M_PI / 180.0;
         }
 
         // convert RPY to quaternion
@@ -436,10 +490,11 @@ namespace riptide_rviz
         if (ctrlMode == riptide_msgs2::msg::ControllerCommand::POSITION)
         {
             // check the angle mode button
-            if(degreeReadout){
-                roll *= M_PI / 180.0; 
-                pitch *= M_PI / 180.0; 
-                yaw *= M_PI / 180.0; 
+            if (degreeReadout)
+            {
+                roll *= M_PI / 180.0;
+                pitch *= M_PI / 180.0;
+                yaw *= M_PI / 180.0;
             }
 
             // convert RPY to quaternion
@@ -448,7 +503,9 @@ namespace riptide_rviz
 
             // build the angular quat for message
             angCmd.setpoint_quat = tf2::toMsg(quat);
-        } else {
+        }
+        else
+        {
             // build the vector
             angCmd.setpoint_vect.x = roll;
             angCmd.setpoint_vect.y = pitch;
@@ -498,11 +555,16 @@ namespace riptide_rviz
         uiPanel->cmdCurrX->setText(QString::number(msg.pose.pose.position.x, 'f', 2));
         uiPanel->cmdCurrY->setText(QString::number(msg.pose.pose.position.y, 'f', 2));
         uiPanel->cmdCurrZ->setText(QString::number(msg.pose.pose.position.z, 'f', 2));
+
+        // Save the last odom message for angular controller
+        lastOdom = msg;
     }
 
-    void ControlPanel::selectedPose(const geometry_msgs::msg::PoseStamped & msg){
+    void ControlPanel::selectedPose(const geometry_msgs::msg::PoseStamped &msg)
+    {
         // check position control mode !!!
-        if (ctrlMode == riptide_msgs2::msg::ControllerCommand::POSITION){
+        if (ctrlMode == riptide_msgs2::msg::ControllerCommand::POSITION)
+        {
             // use z depth from odom
             auto z = uiPanel->cmdCurrZ->text();
             // update the values set by the selected pose
@@ -513,7 +575,7 @@ namespace riptide_rviz
 
             // convert yaw only quat to rpy and populate
             tf2::Quaternion q(msg.pose.orientation.x, msg.pose.orientation.y,
-                            msg.pose.orientation.z, msg.pose.orientation.w);
+                              msg.pose.orientation.z, msg.pose.orientation.w);
             tf2::Matrix3x3 m(q);
             double roll, pitch, yaw;
             m.getRPY(roll, pitch, yaw);
